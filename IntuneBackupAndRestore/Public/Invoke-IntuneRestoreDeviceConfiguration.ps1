@@ -19,6 +19,9 @@ function Invoke-IntuneRestoreDeviceConfiguration {
         [string]$Path,
 
         [Parameter(Mandatory = $false)]
+        [bool]$RestoreById = $false,
+
+        [Parameter(Mandatory = $false)]
         [ValidateSet("v1.0", "Beta")]
         [string]$ApiVersion = "Beta"
     )
@@ -30,7 +33,7 @@ function Invoke-IntuneRestoreDeviceConfiguration {
     }
 
     # Get all device configurations
-    $deviceConfigurations = Get-ChildItem -Path "$path\Device Configurations" -File
+    $deviceConfigurations = Get-ChildItem -Path "$path\Device Configurations" -File -Filter *.json
     
     foreach ($deviceConfiguration in $deviceConfigurations) {
         $deviceConfigurationContent = Get-Content -LiteralPath $deviceConfiguration.FullName -Raw
@@ -38,10 +41,6 @@ function Invoke-IntuneRestoreDeviceConfiguration {
 
         # Remove properties that are not available for creating a new configuration
         $requestBodyObject = $deviceConfigurationContent | ConvertFrom-Json
-        # Set SupportsScopeTags to $false, because $true currently returns an HTTP Status 400 Bad Request error.
-        if ($requestBodyObject.supportsScopeTags) {
-            $requestBodyObject.supportsScopeTags = $false
-        }
 
         $requestBodyObject.PSObject.Properties | Foreach-Object {
             if ($null -ne $_.Value) {
@@ -51,11 +50,15 @@ function Invoke-IntuneRestoreDeviceConfiguration {
             }
         }
 
-        $requestBody = $requestBodyObject | Select-Object -Property * -ExcludeProperty id, createdDateTime, lastModifiedDateTime, version | ConvertTo-Json -Depth 100
+        $requestBody = $requestBodyObject | Select-Object -Property * -ExcludeProperty Id, createdDateTime, lastModifiedDateTime, version, supportsScopeTags, qualityUpdatesPauseExpiryDateTime, featureUpdatesPauseExpiryDateTime, qualityUpdatesRollbackStartDateTime, featureUpdatesRollbackStartDateTime, qualityUpdatesPauseStartDate, featureUpdatesPauseStartDate, qualityUpdatesWillBeRolledBack, featureUpdatesWillBeRolledBack, featureUpdatesPaused, qualityUpdatesPaused | ConvertTo-Json -Depth 100
 
         # Restore the device configuration
         try {
-            $null = Invoke-MSGraphRequest -HttpMethod POST -Content $requestBody.toString() -Url "deviceManagement/deviceConfigurations" -ErrorAction Stop
+            if($RestoreById)
+            { $null = Invoke-MSGraphRequest -HttpMethod PATCH -Content $requestBody.toString() -Url "deviceManagement/deviceConfigurations/$(($deviceConfigurationContent | ConvertFrom-Json).id)" -ErrorAction Stop }
+            else 
+            { $null = Invoke-MSGraphRequest -HttpMethod POST -Content $requestBody.toString() -Url "deviceManagement/deviceConfigurations" -ErrorAction Stop}
+            
             [PSCustomObject]@{
                 "Action" = "Restore"
                 "Type"   = "Device Configuration"
@@ -65,6 +68,7 @@ function Invoke-IntuneRestoreDeviceConfiguration {
         }
         catch {
             Write-Verbose "$deviceConfigurationDisplayName - Failed to restore Device Configuration" -Verbose
+            Write-Output $(($deviceConfigurationContent | ConvertFrom-Json).id); Write-Output ""; Write-Output $requestBody.toString();
             Write-Error $_ -ErrorAction Continue
         }
     }

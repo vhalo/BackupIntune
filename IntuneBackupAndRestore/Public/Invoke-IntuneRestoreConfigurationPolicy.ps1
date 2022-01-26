@@ -19,10 +19,13 @@ function Invoke-IntuneRestoreConfigurationPolicy {
         [string]$Path,
 
         [Parameter(Mandatory = $false)]
+        [bool]$RestoreById = $false,
+
+        [Parameter(Mandatory = $false)]
         [ValidateSet("v1.0", "Beta")]
         [string]$ApiVersion = "Beta"
     )
-
+ 
     # Set the Microsoft Graph API endpoint
     if (-not ((Get-MSGraphEnvironment).SchemaVersion -eq $apiVersion)) {
         Update-MSGraphEnvironment -SchemaVersion $apiVersion -Quiet
@@ -30,17 +33,21 @@ function Invoke-IntuneRestoreConfigurationPolicy {
     }
 
     # Get all Settings Catalog Policies
-    $configurationPolicies = Get-ChildItem -Path "$Path\Settings Catalog" -File
+    $configurationPolicies = Get-ChildItem -Path "$Path\Settings Catalog" -File -Filter *.json
 
     foreach ($configurationPolicy in $configurationPolicies) {
         $configurationPolicyContent = Get-Content -LiteralPath $configurationPolicy.FullName -Raw | ConvertFrom-Json
-        
+
         # Remove properties that are not available for creating a new configuration
         $requestBody = $configurationPolicyContent | Select-Object -Property * -ExcludeProperty id, createdDateTime, lastModifiedDateTime, settingCount, creationSource | ConvertTo-Json -Depth 100
 
         # Restore the Settings Catalog Policy
         try {
-            $null = Invoke-MSGraphRequest -HttpMethod POST -Content $requestBody.toString() -Url "deviceManagement/configurationPolicies" -ErrorAction Stop
+            if($RestoreById)
+            { $null = Invoke-MSGraphRequest -HttpMethod PUT -Content $requestBody.toString() -Url "deviceManagement/configurationPolicies/$($configurationPolicyContent.id)" -ErrorAction Stop }
+            else 
+            { $null = Invoke-MSGraphRequest -HttpMethod POST -Content $requestBody.toString() -Url "deviceManagement/configurationPolicies" -ErrorAction Stop }
+
             [PSCustomObject]@{
                 "Action" = "Restore"
                 "Type"   = "Settings Catalog"
